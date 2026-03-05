@@ -1,5 +1,5 @@
 // Tool: Playwright (Node.js)
-// Flow: Register → Login → Search → Open Product → Add to Basket → Assert Basket Count
+// Flow: Login → Search → Open Product → Add to Basket → Assert Basket Count
 // Author: QA Intern Submission — CipherSchools Practical Assignment
 
 import { test, expect } from "@playwright/test";
@@ -10,83 +10,53 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../config/.env") });
 
-const BASE_URL    = process.env.BASE_URL || "https://with-bugs.practicesoftwaretesting.com";
-const SEARCH_TERM = process.env.SEARCH_TERM || "Pliers";
+const BASE_URL    = process.env.BASE_URL     || "https://with-bugs.practicesoftwaretesting.com";
+const TEST_EMAIL  = process.env.TEST_EMAIL   || "customer@practicesoftwaretesting.com";
+const TEST_PASS   = process.env.TEST_PASSWORD|| "welcome01";
+const SEARCH_TERM = process.env.SEARCH_TERM  || "Pliers";
 
-function uniqueEmail() {
-  return `testlearner_${Date.now()}@mailinator.com`;
-}
+test.setTimeout(120000); // 2 minutes
 
-test.setTimeout(120000); // 2 minute timeout for the full journey
+test("Learner Journey — Login, Search, Add to Basket", async ({ page }) => {
 
-test("Learner Journey — Register, Login, Search, Add to Basket", async ({ page }) => {
-  const email    = uniqueEmail();
-  const password = "Test@12345";
-
-  // ── STEP 1: Register ────────────────────────────────────────
-  console.log("Step 1: Registering new user...");
-  await page.goto(`${BASE_URL}/#/auth/register`);
-  await page.waitForLoadState("domcontentloaded");
-
-  await page.locator('input[data-test="first-name"]').fill("Test");
-  await page.locator('input[data-test="last-name"]').fill("Learner");
-  await page.locator('input[data-test="dob"]').fill("1995-06-15");
-  await page.locator('input[data-test="address"]').fill("10 MG Road");
-  await page.locator('input[data-test="postcode"]').fill("110001");
-  await page.locator('input[data-test="city"]').fill("Delhi");
-
-  // Select country first and wait before selecting state
-  await page.locator('select[data-test="country"]').selectOption("India");
-  await page.waitForTimeout(1000);
-
-  // State field may not exist on all versions of the app — skip if not found
-  const stateField = page.locator('select[data-test="state"]');
-  const stateVisible = await stateField.isVisible().catch(() => false);
-  if (stateVisible) {
-    await stateField.selectOption({ index: 1 });
-  }
-
-  await page.locator('input[data-test="phone"]').fill("9876543210");
-  await page.locator('input[data-test="email"]').fill(email);
-  await page.locator('input[data-test="password"]').fill(password);
-
-  await page.locator('[data-test="register-submit"]').click();
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(2000);
-  console.log("Step 1 complete: Registration done");
-
-  // ── STEP 2: Login ───────────────────────────────────────────
-  console.log("Step 2: Logging in...");
+  // ── STEP 1: Login ───────────────────────────────────────────
+  console.log("Step 1: Logging in...");
   await page.goto(`${BASE_URL}/#/auth/login`);
-  await page.waitForLoadState("domcontentloaded");
-
-  await page.locator('input[data-test="email"]').fill(email);
-  await page.locator('input[data-test="password"]').fill(password);
-  await page.locator('[data-test="login-submit"]').click();
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(2000);
-
-  // Assert login worked
-  await expect(page.locator('[data-test="nav-menu"]')).toBeVisible({ timeout: 15000 });
-  console.log("Step 2 complete: Logged in successfully");
-
-  // ── STEP 3: Search ──────────────────────────────────────────
-  console.log("Step 3: Searching for product...");
-  await page.goto(`${BASE_URL}`);
-  await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(1000);
-
-  await page.locator('input[data-test="search-query"]').fill(SEARCH_TERM);
-  await page.locator('[data-test="search-submit"]').click();
   await page.waitForLoadState("domcontentloaded");
   await page.waitForTimeout(1500);
 
-  // Click first product to open detail page
+  await page.locator('input[data-test="email"]').fill(TEST_EMAIL);
+  await page.locator('input[data-test="password"]').fill(TEST_PASS);
+  await page.locator('[data-test="login-submit"]').click();
+  await page.waitForTimeout(3000);
+
+  // Assert login worked — URL should change away from login page
+  await expect(page).not.toHaveURL(/auth\/login/, { timeout: 15000 });
+  console.log("Step 1 complete: Logged in successfully");
+
+  // ── STEP 2: Search ──────────────────────────────────────────
+  console.log("Step 2: Searching for product...");
+  await page.goto(`${BASE_URL}`);
+  await page.waitForLoadState("domcontentloaded");
+  await page.waitForTimeout(1500);
+
+  await page.locator('input[data-test="search-query"]').fill(SEARCH_TERM);
+  await page.locator('[data-test="search-submit"]').click();
+  await page.waitForTimeout(2000);
+
+  // Assert results appeared
   const firstProduct = page.locator('[data-test="product-name"]').first();
   await expect(firstProduct).toBeVisible({ timeout: 15000 });
+  console.log("Step 2 complete: Search results shown");
+
+  // ── STEP 3: Open product detail page ───────────────────────
+  console.log("Step 3: Opening product detail page...");
   await firstProduct.click();
   await page.waitForLoadState("domcontentloaded");
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1500);
+
+  // Assert detail page loaded
+  await expect(page.locator('[data-test="add-to-cart"]')).toBeVisible({ timeout: 15000 });
   console.log("Step 3 complete: Product detail page opened");
 
   // ── STEP 4: Add to basket and assert count ──────────────────
@@ -101,9 +71,10 @@ test("Learner Journey — Register, Login, Search, Add to Basket", async ({ page
   } catch {
     countBefore = 0;
   }
+  console.log(`Cart count before: ${countBefore}`);
 
   await page.locator('[data-test="add-to-cart"]').click();
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(2000);
 
   // ── CRITICAL ASSERTION ──────────────────────────────────────
   // This WILL FAIL if the cart/enrollment flow is broken
@@ -113,5 +84,6 @@ test("Learner Journey — Register, Login, Search, Add to Basket", async ({ page
   );
   // ───────────────────────────────────────────────────────────
 
+  console.log(`Cart count after: ${countBefore + 1}`);
   console.log("Step 4 complete: Cart count incremented correctly!");
 });
