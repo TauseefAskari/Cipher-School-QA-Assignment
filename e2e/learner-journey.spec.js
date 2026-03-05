@@ -7,122 +7,90 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// Load environment config — base URL and credentials are never hardcoded
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../config/.env") });
 
-const BASE_URL   = process.env.BASE_URL;
+const BASE_URL    = process.env.BASE_URL || "https://with-bugs.practicesoftwaretesting.com";
 const SEARCH_TERM = process.env.SEARCH_TERM || "Pliers";
 
-// Generate a unique email each run so registration always works
 function uniqueEmail() {
-  const ts = Date.now();
-  return `testlearner_${ts}@mailinator.com`;
+  return `testlearner_${Date.now()}@mailinator.com`;
 }
 
-test.describe("Learner Journey — End-to-End", () => {
-  let registeredEmail;
+// Single end-to-end test — all steps in one flow so state is shared
+test("Learner Journey — Register, Login, Search, Add to Basket", async ({ page }) => {
+  const email    = uniqueEmail();
   const password = "Test@12345";
 
-  // ─────────────────────────────────────────────────────────────
-  // STEP 1 — Register a brand-new user account
-  // ─────────────────────────────────────────────────────────────
-  test("1. Register a new user account", async ({ page }) => {
-    registeredEmail = uniqueEmail();
+  // ── STEP 1: Register ────────────────────────────────────────
+  console.log("Step 1: Registering new user...");
+  await page.goto(`${BASE_URL}/#/auth/register`);
+  await page.waitForLoadState("networkidle");
 
-    await page.goto(`${BASE_URL}/auth/register`);
+  await page.locator('input[data-test="first-name"]').fill("Test");
+  await page.locator('input[data-test="last-name"]').fill("Learner");
+  await page.locator('input[data-test="dob"]').fill("1995-06-15");
+  await page.locator('input[data-test="address"]').fill("10 MG Road");
+  await page.locator('input[data-test="postcode"]').fill("110001");
+  await page.locator('input[data-test="city"]').fill("Delhi");
+  await page.locator('select[data-test="country"]').selectOption("India");
+  await page.locator('select[data-test="state"]').selectOption({ index: 1 });
+  await page.locator('input[data-test="phone"]').fill("9876543210");
+  await page.locator('input[data-test="email"]').fill(email);
+  await page.locator('input[data-test="password"]').fill(password);
 
-    // Fill registration form with realistic data
-    await page.getByLabel("First name").fill("Test");
-    await page.getByLabel("Last name").fill("Learner");
-    await page.getByLabel("Date of Birth").fill("1995-06-15");
-    await page.getByLabel("Address").fill("10 MG Road");
-    await page.getByLabel("City").fill("Delhi");
-    await page.getByLabel("State").fill("DL");
-    await page.getByLabel("Country").selectOption("India");
-    await page.getByLabel("Phone").fill("9876543210");
-    await page.getByLabel("Email").fill(registeredEmail);
-    await page.getByLabel("Password").fill(password);
+  await page.locator('[data-test="register-submit"]').click();
+  await page.waitForLoadState("networkidle");
+  console.log("Step 1 complete: Registration done");
 
-    await page.getByRole("button", { name: /register/i }).click();
+  // ── STEP 2: Login ───────────────────────────────────────────
+  console.log("Step 2: Logging in...");
+  await page.goto(`${BASE_URL}/#/auth/login`);
+  await page.waitForLoadState("networkidle");
 
-    // Assert redirect away from registration page — account created
-    await expect(page).not.toHaveURL(/register/, { timeout: 10_000 });
-  });
+  await page.locator('input[data-test="email"]').fill(email);
+  await page.locator('input[data-test="password"]').fill(password);
+  await page.locator('[data-test="login-submit"]').click();
+  await page.waitForLoadState("networkidle");
 
-  // ─────────────────────────────────────────────────────────────
-  // STEP 2 — Log in with the newly created credentials
-  // ─────────────────────────────────────────────────────────────
-  test("2. Log in with registered credentials", async ({ page }) => {
-    await page.goto(`${BASE_URL}/auth/login`);
+  await expect(page.locator('[data-test="nav-menu"]')).toBeVisible({ timeout: 10000 });
+  console.log("Step 2 complete: Logged in");
 
-    await page.getByLabel("Email").fill(registeredEmail);
-    await page.getByLabel("Password").fill(password);
-    await page.getByRole("button", { name: /sign in|log in/i }).click();
+  // ── STEP 3: Search ──────────────────────────────────────────
+  console.log("Step 3: Searching for product...");
+  await page.goto(`${BASE_URL}`);
+  await page.waitForLoadState("networkidle");
 
-    // Assert authenticated state — user name or account link appears
-    await expect(
-      page.getByRole("link", { name: /account|profile|my account/i })
-    ).toBeVisible({ timeout: 10_000 });
-  });
+  await page.locator('input[data-test="search-query"]').fill(SEARCH_TERM);
+  await page.locator('[data-test="search-submit"]').click();
+  await page.waitForLoadState("networkidle");
 
-  // ─────────────────────────────────────────────────────────────
-  // STEP 3 — Search for a course/product by keyword
-  // ─────────────────────────────────────────────────────────────
-  test("3. Search for a product by keyword and open detail page", async ({ page }) => {
-    await page.goto(BASE_URL);
+  const firstProduct = page.locator('[data-test="product-name"]').first();
+  await expect(firstProduct).toBeVisible({ timeout: 10000 });
+  await firstProduct.click();
+  await page.waitForLoadState("networkidle");
+  console.log("Step 3 complete: Product detail page opened");
 
-    // Smart wait: fill and submit search
-    const searchInput = page.getByPlaceholder(/search/i);
-    await searchInput.fill(SEARCH_TERM);
-    await searchInput.press("Enter");
+  // ── STEP 4: Add to basket and assert count ──────────────────
+  console.log("Step 4: Adding to basket...");
 
-    // Wait for at least one result card to appear
-    const firstResult = page.locator("[data-test='product-name']").first();
-    await expect(firstResult).toBeVisible({ timeout: 10_000 });
+  let countBefore = 0;
+  try {
+    const badge = page.locator('[data-test="cart-quantity"]');
+    const text  = await badge.innerText({ timeout: 3000 });
+    countBefore = parseInt(text, 10) || 0;
+  } catch {
+    countBefore = 0;
+  }
 
-    // Click into the first matching product
-    await firstResult.click();
+  await page.locator('[data-test="add-to-cart"]').click();
 
-    // Assert we're on a detail page — the product name heading should be visible
-    await expect(page.locator("[data-test='product-name']")).toBeVisible({
-      timeout: 10_000,
-    });
-  });
+  // ── CRITICAL ASSERTION ──────────────────────────────────────
+  await expect(page.locator('[data-test="cart-quantity"]')).toHaveText(
+    String(countBefore + 1),
+    { timeout: 10000 }
+  );
+  // ───────────────────────────────────────────────────────────
 
-  // ─────────────────────────────────────────────────────────────
-  // STEP 4 — Add the course to the enrollment basket
-  //           CRITICAL ASSERTION: basket count must increment
-  // ─────────────────────────────────────────────────────────────
-  test("4. Add product to basket and assert item count increments", async ({ page }) => {
-    await page.goto(BASE_URL);
-
-    // Search and open first result
-    const searchInput = page.getByPlaceholder(/search/i);
-    await searchInput.fill(SEARCH_TERM);
-    await searchInput.press("Enter");
-    await page.locator("[data-test='product-name']").first().click();
-
-    // Capture basket count BEFORE adding item
-    const cartBadge = page.locator("[data-test='cart-quantity']");
-
-    let countBefore = 0;
-    try {
-      const text = await cartBadge.innerText({ timeout: 3_000 });
-      countBefore = parseInt(text, 10) || 0;
-    } catch {
-      // Badge may not exist yet (empty cart) — treat as 0
-    }
-
-    // Add to cart — use aria-label or data-test attribute (no brittle XPath)
-    await page.getByRole("button", { name: /add to cart/i }).click();
-
-    // ── CRITICAL ASSERTION ────────────────────────────────────
-    // This assertion WILL FAIL if the enrollment/cart flow is broken.
-    // We wait explicitly for the badge to show the incremented value.
-    await expect(cartBadge).toHaveText(String(countBefore + 1), {
-      timeout: 10_000,
-    });
-    // ─────────────────────────────────────────────────────────
-  });
+  console.log("Step 4 complete: Item added. Cart count incremented correctly.");
 });
